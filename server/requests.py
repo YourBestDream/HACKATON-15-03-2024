@@ -1,5 +1,6 @@
 import os
 import shutil
+import codecs
 
 import requests as rs
 from flask import Blueprint, jsonify, request
@@ -79,10 +80,12 @@ def news():
 
     client = Client()
     response = client.chat.completions.create(
-    model="gpt-4",
+    model="gpt-4-turbo",
     messages=[{"role": "user", "content": '''
-    Что сказал Дорин Речан про платы ассистентам
+    Что Дорин Речан сказал по поводу зарплат ассистентов
     '''}],
-    )
+    ).choices[0].message.content
+    print(response)
+    true_response = bytes(response, 'utf-8').decode('unicode_escape')
 
-    return jsonify({'response':response.choices[0].message.content})
+    return jsonify({'response':true_response})
