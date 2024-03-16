@@ -18,7 +18,7 @@ import g4f
 load_dotenv()
 
 requests = Blueprint('requests',__name__)
-whisper_parser = OpenAIWhisperParserLocal(lang_model='openai/whisper-small', forced_decoder_ids=({"language":"russian", "task":"transcribe"}))
+whisper_parser = OpenAIWhisperParserLocal(device = "gpu", lang_model='openai/whisper-small', forced_decoder_ids=({"language":"romanian", "task":"transcribe"}))
 
 @requests.route('/transform', methods = ['POST'])
 def transform():
@@ -81,25 +81,26 @@ def structurize_request():
     For example if you will receive the following transcription: "I want to know what happened with Steve Harvey this week" you SHOULD give the following answer in JSON format: 
     "category": "News",
     "additional_data" : "What happened with Steve Harvey last week"
-    If you cannot classify the transcription just leave the category blank and in additional information write the answer to the user.
+    If you cannot classify the transcription just leave the category blank and in additional_data write your answer to the user like if you were talking to the normal user without remindings about clasification.
     If you categorize the transcription as person-search you should leave in additional_data ONLY names.
     If you categorize the transcription as weather you should leave in additional_data ONLY the name of the city.
+    You SHOULD always answer IN the LANGUAGE OF TRANSCRIPTION
     TRANSCRIPTION:
     {transcription}
-    ANSWER IN JSON FORMAT:
+    ANSWER ONLY IN JSON FORMAT:
     '''}],
     )
+
     response = response.choices[0].message.content
     end = time.time()
     print(end-start)
     response = json.loads(response)
-    # response = dict(response)
-    # return jsonify({'category':category,'additional_data':additional_data})
     return jsonify(response)
 
-@requests.route('/weather', methods = ['GET','POST'])
-def get_weather(city_name):
-    url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={os.environ.get('WEATHER_API')}&units=metric"
+@requests.route('/weather', methods = ['POST'])
+def get_weather():
+    city_name = request.get_json().get('query')
+    url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={os.environ.get('WEATHER_API_KEY')}&units=metric"
     response = rs.get(url)
     data = response.json()
 
@@ -115,11 +116,12 @@ def get_weather(city_name):
 
 @requests.route('/news', methods=['GET','POST'])
 def news():
+    query = request.get_json().get('query')
     client = Client()
     response = client.chat.completions.create(
     model="gpt-4-turbo",
-    messages=[{"role": "user", "content": '''
-    Что Дорин Речан сказал по поводу зарплат ассистентов
+    messages=[{"role": "user", "content": f'''
+    {query}
     '''}],
     ).choices[0].message.content
     print(response)
