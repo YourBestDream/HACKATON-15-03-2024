@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify
+import requests as rs
 
 views = Blueprint('views', __name__)
 

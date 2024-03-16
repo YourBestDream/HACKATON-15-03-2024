@@ -1,7 +1,11 @@
 import os
 import shutil
 import codecs
+import time
+import io
+import json
 
+from PIL import Image
 import requests as rs
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
@@ -9,11 +13,12 @@ from langchain.document_loaders.generic import GenericLoader
 from langchain.document_loaders.parsers.audio import OpenAIWhisperParserLocal
 from dotenv import load_dotenv
 from g4f.client import Client
+import g4f
 
 load_dotenv()
 
 requests = Blueprint('requests',__name__)
-whisper_parser = OpenAIWhisperParserLocal(lang_model='openai/whisper-base')
+whisper_parser = OpenAIWhisperParserLocal(lang_model='openai/whisper-small', forced_decoder_ids=({"language":"russian", "task":"transcribe"}))
 
 @requests.route('/transform', methods = ['POST'])
 def transform():
@@ -40,27 +45,60 @@ def transform():
             path=filepath,
             parser=whisper_parser
         )
-        print('C audioloader что-то не так')
+        
         # Load and process the audio file
+        start = time.time()
         result = next(audio_loader.lazy_load())
-        print('скрипт отработал')
+        end = time.time()
+        print(end-start)
         print(result.page_content)
         
+        #rs.post("http://192.168.8.173/api/v1/authentication/parseTranscription", json={'transcription':result.page_content})
+
         return jsonify({
             'message': 'File uploaded and processed successfully',
             'transcription': result.page_content
         })
+
     except Exception as e:
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
     finally:
-        # Clean up the directory after processing
         shutil.rmtree(save_dir)
 
+@requests.route('/structurize',methods=['POST'])
+def structurize_request():
+    transcription = request.get_json().get('transcription')
+
+    client = Client()
+    start = time.time()
+    response = client.chat.completions.create(
+    model=g4f.models.gpt_35_turbo_16k,
+    messages=[{"role": "user", "content": f'''
+    I need you to THORORUGHLY analyze the transcription I will give you. You should ONLY analyze, you SHOULD NOT try to answer the request. Your reponse should be in json formatwith 2 elements: "category" and "additional_data". Category element can contain only these categories: news, weather or person-search. 
+    For example if you will receive the following transcription: "I want to know what happened with Steve Harvey this week" you SHOULD give the following answer in JSON format: 
+    "category": "News",
+    "additional_data" : "What happened with Steve Harvey last week"
+    If you cannot classify the transcription just leave the category blank and in additional information write the answer to the user.
+    If you categorize the transcription as person-search you should leave in additional_data ONLY names.
+    If you categorize the transcription as weather you should leave in additional_data ONLY the name of the city.
+    TRANSCRIPTION:
+    {transcription}
+    ANSWER IN JSON FORMAT:
+    '''}],
+    )
+    response = response.choices[0].message.content
+    end = time.time()
+    print(end-start)
+    response = json.loads(response)
+    # response = dict(response)
+    # return jsonify({'category':category,'additional_data':additional_data})
+    return jsonify(response)
+
 @requests.route('/weather', methods = ['GET','POST'])
-def get_weather(city_name, api_key):
+def get_weather(city_name):
     url = f"http://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={os.environ.get('WEATHER_API')}&units=metric"
     response = rs.get(url)
     data = response.json()
@@ -77,7 +115,6 @@ def get_weather(city_name, api_key):
 
 @requests.route('/news', methods=['GET','POST'])
 def news():
-
     client = Client()
     response = client.chat.completions.create(
     model="gpt-4-turbo",
@@ -86,6 +123,51 @@ def news():
     '''}],
     ).choices[0].message.content
     print(response)
-    true_response = bytes(response, 'utf-8').decode('unicode_escape')
 
-    return jsonify({'response':true_response})
+    return jsonify({'response':response})
+
+@requests.route('/person-search', methods=['POST'])
+def find_a_person():
+    if 'photo' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+    file = request.files['photo']
+    
+    # If the user does not select a file, the browser submits an
+    # empty file without a filename.
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    
+    upload_url = "https://search4faces.com/upload.php"
+    if not file.content_type == 'image/jpeg':
+        try:
+            # Convert the image to JPEG
+            image = Image.open(file.stream)
+            with io.BytesIO() as output:
+                image.convert('RGB').save(output, format='JPEG')
+                image_data = output.getvalue()
+        except IOError:
+            return jsonify({'error': 'File conversion error'}), 500
+    else:
+        image_data = file.read()
+
+    headers = {
+        "Referer": "https://search4faces.com/en/vkok/index.html",
+        "Content-Type": "image/jpeg"  # Set the content type to JPEG
+    }
+
+    upload_response = rs.post(upload_url, data=image_data, headers=headers)
+    if upload_response.status_code != 200:
+        return jsonify({'error': 'Failed to upload image'}), 500
+
+    # Process response from the upload
+    response_json = upload_response.json()
+    detect_url = "https://search4faces.com/detect.php"
+    detect_response = rs.post(detect_url, json={"query": "vkok", "lang": "en", "filename": response_json["url"], "boundings": response_json["boundings"][0]})
+    
+    if detect_response.status_code != 200:
+        return jsonify({'error': 'Failed to detect faces'}), 500
+
+    detect_json = detect_response.json()
+    selected_links = [detect_json["faces"][i][1] for i in range(3)]
+    
+    return jsonify({'links': selected_links})
