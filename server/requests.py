@@ -7,6 +7,10 @@ import json
 
 from PIL import Image
 import requests as rs
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 from langchain.document_loaders.generic import GenericLoader
@@ -173,3 +177,71 @@ def find_a_person():
     selected_links = [detect_json["faces"][i][1] for i in range(3)]
     
     return jsonify({'links': selected_links})
+
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+@requests.route('/meeting', methods = ['GET','POST'])
+def create_meeting():
+    starting_time = '2024-03-31T10:00:00'
+    ending_time = '2024-03-31T11:00:00'
+    attendees = ['ferari100w3@gmail.com']
+
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'credentials.json', SCOPES)
+            creds = flow.run_local_server(host='localhost', port=8880)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+
+    service = build('calendar', 'v3', credentials=creds)
+
+    event = {
+        'summary': 'Test Meeting',  # Corrected summary
+        'description': 'This is a test meeting.',  # Corrected description
+        'start': {
+            'dateTime': starting_time,
+            'timeZone': 'Europe/Chisinau',
+        },
+        'end': {
+            'dateTime': ending_time,  # Fixed datetime format
+            'timeZone': 'Europe/Chisinau',
+        },
+        'conferenceData': {
+            'createRequest': {'requestId': 'random_string'}
+        },
+        'reminders': {
+            'useDefault': False,
+            'overrides': [
+                {'method': 'email', 'minutes': 24 * 60},
+                {'method': 'popup', 'minutes': 10},
+            ],
+        },
+    }
+
+    if attendees:
+        event['attendees'] = [{'email': attendee} for attendee in attendees]
+
+    try:
+        event = service.events().insert(calendarId='primary', body=event, conferenceDataVersion=1).execute()
+        print('Event created: %s' % event.get('htmlLink'))
+
+        meet_link = None
+        entry_points = event.get('conferenceData', {}).get('entryPoints', [])
+        for entry_point in entry_points:
+            if entry_point.get('entryPointType') == 'video':
+                meet_link = entry_point.get('uri')
+                break
+        
+        if meet_link:
+            return jsonify({'meeting': meet_link})
+        else:
+            return jsonify({'error':'Google Meet link not found.'})
+            
+    except Exception as e:
+        return jsonify({'error':f'An error occured during meeting planing:{e}'})
