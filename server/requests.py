@@ -4,6 +4,7 @@ import codecs
 import time
 import io
 import json
+from datetime import datetime, timedelta
 
 from PIL import Image
 import requests as rs
@@ -81,13 +82,14 @@ def structurize_request():
     response = client.chat.completions.create(
     model=g4f.models.gpt_35_turbo_16k,
     messages=[{"role": "user", "content": f'''
-    I need you to THORORUGHLY analyze the transcription I will give you. You should ONLY analyze, you SHOULD NOT try to answer the request. Your reponse should be in json formatwith 2 elements: "category" and "additional_data". Category element can contain only these categories: news, weather or person-search. 
+    I need you to THORORUGHLY analyze the transcription I will give you. You should ONLY analyze, you SHOULD NOT try to answer the request. Your reponse should be in json formatwith 2 elements: "category" and "additional_data". Category element can contain only these categories: news, weather, person-search or meeting. 
     For example if you will receive the following transcription: "I want to know what happened with Steve Harvey this week" you SHOULD give the following answer in JSON format: 
     "category": "News",
     "additional_data" : "What happened with Steve Harvey last week"
     If you cannot classify the transcription just leave the category blank and in additional_data write your answer to the user like if you were talking to the normal user without remindings about clasification.
-    If you categorize the transcription as person-search you should leave in additional_data ONLY names.
-    If you categorize the transcription as weather you should leave in additional_data ONLY the name of the city.
+    If you categorize the transcription as "person-search" you should leave in "additional_data" ONLY names.
+    If you categorize the transcription as "weather" you should leave in "additional_data" ONLY the name of the city.
+    If you categorize the transcription as "meeting" you should leave in "additional_data" ONLY the time of the beggining in format "2024-03-31T10:00:00"
     You SHOULD always answer IN the LANGUAGE OF TRANSCRIPTION
     TRANSCRIPTION:
     {transcription}
@@ -182,8 +184,14 @@ SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 @requests.route('/meeting', methods = ['GET','POST'])
 def create_meeting():
-    starting_time = '2024-03-31T10:00:00'
-    ending_time = '2024-03-31T11:00:00'
+    # starting_time = '2024-03-31T10:00:00'
+    starting_time = request.get_json().get("query")
+    datetime_obj = datetime.strptime(starting_time, '%Y-%m-%dT%H:%M:%S')
+    # Adding one hour
+    datetime_obj_plus_one_hour = datetime_obj + timedelta(hours=1)
+
+    ending_time = datetime_obj_plus_one_hour.strftime('%Y-%m-%dT%H:%M:%S')
+    # ending_time = '2024-03-31T11:00:00'
     attendees = ['ferari100w3@gmail.com']
 
     creds = None
