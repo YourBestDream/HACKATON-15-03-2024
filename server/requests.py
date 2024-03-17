@@ -6,12 +6,16 @@ import io
 import json
 from datetime import datetime, timedelta
 
+from .external_funcs import get_contacts
+
 from PIL import Image
 import requests as rs
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.errors import HttpError
 from flask import Blueprint, jsonify, request
 from werkzeug.utils import secure_filename
 from langchain.document_loaders.generic import GenericLoader
@@ -178,9 +182,13 @@ def find_a_person():
     detect_json = detect_response.json()
     selected_links = [detect_json["faces"][i][1] for i in range(3)]
     
-    return jsonify({'links': selected_links})
+    return jsonify({'links': selected_links}), 200
 
 SCOPES = ['https://www.googleapis.com/auth/calendar']
+# Path to the service account credentials file
+SERVICE_ACCOUNT_FILE = 'E:\programs\HACKATON-15-03-2024\service_account.json'
+# Scopes for Google Contacts API
+SCOPES2 = ['https://www.googleapis.com/auth/contacts.readonly']
 
 @requests.route('/meeting', methods = ['GET','POST'])
 def create_meeting():
@@ -192,7 +200,10 @@ def create_meeting():
 
     ending_time = datetime_obj_plus_one_hour.strftime('%Y-%m-%dT%H:%M:%S')
     # ending_time = '2024-03-31T11:00:00'
-    attendees = ['ferari100w3@gmail.com']
+    contacts = get_contacts()
+    name = 'Dima Cvasiuc'
+    attendees = []
+    attendees.append(contacts[name])
 
     creds = None
     if os.path.exists('token.json'):
